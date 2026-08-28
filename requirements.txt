@@ -3,3 +3,4 @@ streamlit
 xlsxwriter
 pdfkit
 plotly
+matplotlib
