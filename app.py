@@ -15,25 +15,45 @@ st.title("📊 Dashboard Data SIGAP Instansi")
 st.markdown("---")
 
 # ==========================================
-# 0. MEMUAT DATA OTOMATIS (ANTI-ERROR)
+# 2. MENGOLAH DATA WILAYAH DARI PLAT NOMOR
 # ==========================================
-@st.cache_data
-def load_data():
-    target_file = 'detil_data_sigap_instansi_2026-08-27T09_03_07.260452959Z.csv'
-    if os.path.exists(target_file):
-        return pd.read_csv(target_file)
+def tentukan_wilayah(plat):
+    if pd.isna(plat):
+        return 'Tidak Diketahui'
     
-    csv_files = glob.glob('*.csv')
-    if csv_files:
-        return pd.read_csv(csv_files[0])
-    return None
+    # Memastikan plat nomor menjadi huruf besar dan tanpa spasi berlebih
+    plat_str = str(plat).upper().strip()
+    
+    # Mencari huruf PERTAMA yang muncul tepat setelah deretan angka
+    # Contoh: "BL 1234 N" -> mengambil "N"
+    # Contoh: "BL 4567 KAA" -> mengambil "K"
+    match = re.search(r'\d+\s*([A-Z])', plat_str)
+    
+    if match:
+        seri = match.group(1) 
+        
+        # Penentuan wilayah berdasarkan seri plat yang Anda inginkan
+        if seri == 'N': 
+            return 'Lhokseumawe'
+        elif seri == 'Z': 
+            return 'Bireuen'
+        elif seri == 'K' or seri == 'Q': 
+            return 'Aceh Utara'
+        elif seri == 'Y': 
+            return 'Bener Meriah'
+        elif seri == 'G': 
+            return 'Aceh Tengah'
+        else:
+            # Jika seri huruf selain N, Z, K, Q, Y, G
+            return 'Wilayah Lainnya'
+            
+    # Jika baris data tidak memiliki pola angka diikuti huruf
+    return 'Format Plat Tidak Dikenali'
 
-df = load_data()
-
-if df is None:
-    st.error("⚠️ File CSV tidak ditemukan! Pastikan file data Anda sudah di-upload ke GitHub.")
-    st.stop()
-
+if col_plat:
+    df['wilayah_kendaraan'] = df[col_plat].apply(tentukan_wilayah)
+else:
+    df['wilayah_kendaraan'] = 'Kolom Plat Tidak Ditemukan'
 # ==========================================
 # 1. DETEKSI KOLOM PINTAR
 # ==========================================
