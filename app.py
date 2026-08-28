@@ -36,10 +36,6 @@ if df is None:
 # ==========================================
 # 1. PERSIAPAN NAMA KOLOM
 # ==========================================
-# Simpan nama kolom asli untuk ditampilkan ke user
-kolom_asli = df.columns.tolist()
-
-# Standarisasi kolom (huruf kecil, underscore) untuk pencarian internal
 df.columns = df.columns.str.lower().str.strip().str.replace(' ', '_')
 
 def cari_kolom(kata_kunci_list):
@@ -54,28 +50,17 @@ col_sk = cari_kolom(['status_kendaraan', 'status_kend', 'status', 'lunas'])
 col_kunj = cari_kolom(['status_kunjungan', 'status_kunjung', 'kunjungan'])
 col_gol = cari_kolom(['jenis_golongan', 'golongan', 'jenis'])
 
-# ==========================================
-# 2. PENGATURAN PLAT NOMOR MANUAL & AKURAT
-# ==========================================
-st.sidebar.image("https://cdn-icons-png.flaticon.com/512/8636/8636208.png", width=100)
-st.sidebar.header("⚙️ Pengaturan Kolom")
+# Pencarian nama kolom plat nomor diperluas agar pasti terdeteksi
+col_plat = cari_kolom(['plat', 'nopol', 'no_pol', 'polisi', 'tnkb', 'kendaraan'])
 
-# MEMBERIKAN KENDALI PENUH KEPADA ANDA: 
-# Pilih mana kolom yang berisi plat nomor (contoh: BL 1234 N)
-pilihan_kolom_plat = st.sidebar.selectbox(
-    "Pilih Kolom Plat Nomor / Nopol:", 
-    options=df.columns, 
-    help="Pastikan Anda memilih kolom yang isinya benar-benar plat nomor kendaraan."
-)
-
+# ==========================================
+# 2. FILTER 5 WILAYAH UTAMA (DI BELAKANG LAYAR)
+# ==========================================
 def tentukan_wilayah(plat):
     if pd.isna(plat):
-        return 'Tidak Diketahui'
+        return None # Data kosong diabaikan
     
     plat_str = str(plat).upper().strip()
-    
-    # PERBAIKAN REGEX: 
-    # Mencari angka, lalu membolehkan ada spasi, titik, atau tanda strip sebelum huruf seri
     match = re.search(r'\d+[-.\s]*([A-Z])', plat_str)
     
     if match:
@@ -85,20 +70,25 @@ def tentukan_wilayah(plat):
         elif seri in ['K', 'Q']: return 'Aceh Utara'
         elif seri == 'Y': return 'Bener Meriah'
         elif seri == 'G': return 'Aceh Tengah'
-        else: return 'Luar Wilayah'
             
-    return 'Format Plat Tidak Dikenali'
+    return None # Jika selain 5 wilayah ini, abaikan
 
-# Memproses wilayah berdasarkan kolom yang Anda pilih di Sidebar
-df['wilayah_kendaraan'] = df[pilihan_kolom_plat].apply(tentukan_wilayah)
+if col_plat:
+    df['wilayah_kendaraan'] = df[col_plat].apply(tentukan_wilayah)
+    # Filter dataset: Hanya simpan data yang termasuk 5 wilayah di atas
+    df = df[df['wilayah_kendaraan'].notna()]
+else:
+    st.error("⚠️ Kolom Plat Nomor tidak dapat ditemukan di dalam file. Pastikan ada kata 'plat' atau 'nopol' di baris judul file Anda.")
+    st.stop()
 
-st.sidebar.markdown("---")
 # ==========================================
 # 3. KONFIGURASI SIDEBAR & FILTER
 # ==========================================
+st.sidebar.image("https://cdn-icons-png.flaticon.com/512/8636/8636208.png", width=100)
 st.sidebar.header("🔍 Filter Data")
 
-filter_wilayah = st.sidebar.multiselect("📍 Wilayah (Dari Plat)", df['wilayah_kendaraan'].dropna().unique())
+# Filter wilayah murni hanya menampilkan 5 wilayah yang Anda inginkan
+filter_wilayah = st.sidebar.multiselect("📍 Wilayah (Sesuai Plat)", df['wilayah_kendaraan'].unique())
 jenis_pemilik = st.sidebar.multiselect("🏢 Jenis Pemilik", df[col_jp].dropna().unique() if col_jp else [])
 nama_pemilik = st.sidebar.multiselect("👤 Nama Pemilik", df[col_np].dropna().unique() if col_np else [])
 status_kend = st.sidebar.multiselect("💰 Status Kendaraan", df[col_sk].dropna().unique() if col_sk else [])
@@ -115,7 +105,7 @@ if status_kunjungan: df_filtered = df_filtered[df_filtered[col_kunj].isin(status
 # 4. DASHBOARD UTAMA
 # ==========================================
 if df_filtered.empty:
-    st.warning("📭 Tidak ada data kendaraan yang sesuai dengan filter.")
+    st.warning("📭 Tidak ada data yang sesuai.")
 else:
     st.subheader("📈 Ringkasan Informasi Eksekutif")
     col1, col2, col3, col4 = st.columns(4)
