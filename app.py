@@ -19,10 +19,12 @@ st.markdown("---")
 # ==========================================
 @st.cache_data
 def load_data():
+    # Coba cari file spesifik terlebih dahulu
     target_file = 'detil_data_sigap_instansi_2026-08-27T09_03_07.260452959Z.csv'
     if os.path.exists(target_file):
         return pd.read_csv(target_file)
     
+    # Jika tidak ada, cari file CSV apapun
     csv_files = glob.glob('*.csv')
     if csv_files:
         return pd.read_csv(csv_files[0])
@@ -35,7 +37,7 @@ if df is None:
     st.stop()
 
 # ==========================================
-# 1. DETEKSI KOLOM PINTAR (TERMASUK col_plat)
+# 1. DETEKSI KOLOM PINTAR
 # ==========================================
 df.columns = df.columns.str.lower().str.strip().str.replace(' ', '_')
 
@@ -50,7 +52,7 @@ col_np = cari_kolom(['nama_pemilik', 'nama_instansi', 'pemilik'])
 col_sk = cari_kolom(['status_kendaraan', 'status_kend', 'status', 'lunas'])
 col_kunj = cari_kolom(['status_kunjungan', 'status_kunjung', 'kunjungan'])
 col_gol = cari_kolom(['jenis_golongan', 'golongan', 'jenis'])
-col_plat = cari_kolom(['plat', 'nopol', 'polisi', 'no_pol', 'nomor']) # Variabel ini yang sebelumnya hilang
+col_plat = cari_kolom(['plat', 'nopol', 'no_pol', 'polisi', 'tnkb']) 
 
 # ==========================================
 # 2. MENGOLAH DATA WILAYAH DARI PLAT NOMOR
@@ -59,25 +61,31 @@ def tentukan_wilayah(plat):
     if pd.isna(plat):
         return 'Tidak Diketahui'
     
+    # Bersihkan data: ubah ke huruf besar, hapus spasi di awal/akhir
     plat_str = str(plat).upper().strip()
+    
+    # Mencari 1 huruf PERTAMA yang muncul tepat setelah deretan angka
     match = re.search(r'\d+\s*([A-Z])', plat_str)
     
     if match:
         seri = match.group(1) 
+        
+        # Penentuan 5 Wilayah Utama
         if seri == 'N': return 'Lhokseumawe'
         elif seri == 'Z': return 'Bireuen'
         elif seri in ['K', 'Q']: return 'Aceh Utara'
         elif seri == 'Y': return 'Bener Meriah'
         elif seri == 'G': return 'Aceh Tengah'
-        else: return 'Wilayah Lainnya'
-    
+        else: return 'Luar Wilayah'
+            
     return 'Format Plat Tidak Dikenali'
 
+# Terapkan filter wilayah ke dalam DataFrame
 if col_plat:
     df['wilayah_kendaraan'] = df[col_plat].apply(tentukan_wilayah)
 else:
     df['wilayah_kendaraan'] = 'Kolom Plat Tidak Ditemukan'
-    st.warning("⚠️ Kolom Plat Nomor tidak ditemukan di data, filter wilayah tidak dapat diproses.")
+    st.warning("⚠️ Kolom Plat Nomor tidak terdeteksi otomatis, filter wilayah tidak dapat memproses data.")
 
 # ==========================================
 # 3. KONFIGURASI SIDEBAR & FILTER
@@ -91,7 +99,7 @@ nama_pemilik = st.sidebar.multiselect("👤 Nama Pemilik", df[col_np].dropna().u
 status_kend = st.sidebar.multiselect("💰 Status Kendaraan", df[col_sk].dropna().unique() if col_sk else [])
 status_kunjungan = st.sidebar.multiselect("🤝 Status Kunjungan", df[col_kunj].dropna().unique() if col_kunj else [])
 
-# Logika Filter
+# Eksekusi Logika Filter
 df_filtered = df.copy()
 if filter_wilayah: df_filtered = df_filtered[df_filtered['wilayah_kendaraan'].isin(filter_wilayah)]
 if jenis_pemilik: df_filtered = df_filtered[df_filtered[col_jp].isin(jenis_pemilik)]
@@ -155,7 +163,7 @@ else:
             matriks = pd.crosstab(df_filtered[col_gol], df_filtered[col_jp])
             st.dataframe(matriks.style.background_gradient(cmap='Blues'), use_container_width=True)
         except Exception as e:
-            st.error(f"Tabel matriks tidak dapat dimuat secara visual: {e}. Berikut versi standarnya:")
+            st.error(f"Tabel matriks berwarna gagal dimuat. Menampilkan versi standar: {e}")
             st.dataframe(pd.crosstab(df_filtered[col_gol], df_filtered[col_jp]), use_container_width=True)
     
     # --- D. TABEL DATA DETAIL ---
@@ -191,7 +199,7 @@ else:
     
     with dl_col2:
         try:
-            pdf_data = convert_df_to_pdf(df_filtered.head(500)) # Membatasi 500 baris agar PDF tidak berat/error
+            pdf_data = convert_df_to_pdf(df_filtered.head(500))
             st.download_button(
                 label="📄 Download Laporan PDF",
                 data=pdf_data,
