@@ -15,16 +15,13 @@ st.title("📊 Dashboard Data SIGAP Instansi")
 st.markdown("---")
 
 # ==========================================
-# 0. MEMUAT DATA OTOMATIS (ANTI-ERROR)
+# 0. MEMUAT DATA OTOMATIS
 # ==========================================
 @st.cache_data
 def load_data():
-    # Coba cari file spesifik terlebih dahulu
     target_file = 'detil_data_sigap_instansi_2026-08-27T09_03_07.260452959Z.csv'
     if os.path.exists(target_file):
         return pd.read_csv(target_file)
-    
-    # Jika tidak ada, cari file CSV apapun
     csv_files = glob.glob('*.csv')
     if csv_files:
         return pd.read_csv(csv_files[0])
@@ -33,12 +30,16 @@ def load_data():
 df = load_data()
 
 if df is None:
-    st.error("⚠️ File CSV tidak ditemukan! Pastikan file data Anda sudah di-upload ke GitHub.")
+    st.error("⚠️ File CSV tidak ditemukan! Pastikan file data Anda sudah di-upload.")
     st.stop()
 
 # ==========================================
-# 1. DETEKSI KOLOM PINTAR
+# 1. PERSIAPAN NAMA KOLOM
 # ==========================================
+# Simpan nama kolom asli untuk ditampilkan ke user
+kolom_asli = df.columns.tolist()
+
+# Standarisasi kolom (huruf kecil, underscore) untuk pencarian internal
 df.columns = df.columns.str.lower().str.strip().str.replace(' ', '_')
 
 def cari_kolom(kata_kunci_list):
@@ -52,25 +53,33 @@ col_np = cari_kolom(['nama_pemilik', 'nama_instansi', 'pemilik'])
 col_sk = cari_kolom(['status_kendaraan', 'status_kend', 'status', 'lunas'])
 col_kunj = cari_kolom(['status_kunjungan', 'status_kunjung', 'kunjungan'])
 col_gol = cari_kolom(['jenis_golongan', 'golongan', 'jenis'])
-col_plat = cari_kolom(['plat', 'nopol', 'no_pol', 'polisi', 'tnkb']) 
 
 # ==========================================
-# 2. MENGOLAH DATA WILAYAH DARI PLAT NOMOR
+# 2. PENGATURAN PLAT NOMOR MANUAL & AKURAT
 # ==========================================
+st.sidebar.image("https://cdn-icons-png.flaticon.com/512/8636/8636208.png", width=100)
+st.sidebar.header("⚙️ Pengaturan Kolom")
+
+# MEMBERIKAN KENDALI PENUH KEPADA ANDA: 
+# Pilih mana kolom yang berisi plat nomor (contoh: BL 1234 N)
+pilihan_kolom_plat = st.sidebar.selectbox(
+    "Pilih Kolom Plat Nomor / Nopol:", 
+    options=df.columns, 
+    help="Pastikan Anda memilih kolom yang isinya benar-benar plat nomor kendaraan."
+)
+
 def tentukan_wilayah(plat):
     if pd.isna(plat):
         return 'Tidak Diketahui'
     
-    # Bersihkan data: ubah ke huruf besar, hapus spasi di awal/akhir
     plat_str = str(plat).upper().strip()
     
-    # Mencari 1 huruf PERTAMA yang muncul tepat setelah deretan angka
-    match = re.search(r'\d+\s*([A-Z])', plat_str)
+    # PERBAIKAN REGEX: 
+    # Mencari angka, lalu membolehkan ada spasi, titik, atau tanda strip sebelum huruf seri
+    match = re.search(r'\d+[-.\s]*([A-Z])', plat_str)
     
     if match:
         seri = match.group(1) 
-        
-        # Penentuan 5 Wilayah Utama
         if seri == 'N': return 'Lhokseumawe'
         elif seri == 'Z': return 'Bireuen'
         elif seri in ['K', 'Q']: return 'Aceh Utara'
@@ -80,17 +89,13 @@ def tentukan_wilayah(plat):
             
     return 'Format Plat Tidak Dikenali'
 
-# Terapkan filter wilayah ke dalam DataFrame
-if col_plat:
-    df['wilayah_kendaraan'] = df[col_plat].apply(tentukan_wilayah)
-else:
-    df['wilayah_kendaraan'] = 'Kolom Plat Tidak Ditemukan'
-    st.warning("⚠️ Kolom Plat Nomor tidak terdeteksi otomatis, filter wilayah tidak dapat memproses data.")
+# Memproses wilayah berdasarkan kolom yang Anda pilih di Sidebar
+df['wilayah_kendaraan'] = df[pilihan_kolom_plat].apply(tentukan_wilayah)
 
+st.sidebar.markdown("---")
 # ==========================================
 # 3. KONFIGURASI SIDEBAR & FILTER
 # ==========================================
-st.sidebar.image("https://cdn-icons-png.flaticon.com/512/8636/8636208.png", width=100)
 st.sidebar.header("🔍 Filter Data")
 
 filter_wilayah = st.sidebar.multiselect("📍 Wilayah (Dari Plat)", df['wilayah_kendaraan'].dropna().unique())
@@ -99,7 +104,6 @@ nama_pemilik = st.sidebar.multiselect("👤 Nama Pemilik", df[col_np].dropna().u
 status_kend = st.sidebar.multiselect("💰 Status Kendaraan", df[col_sk].dropna().unique() if col_sk else [])
 status_kunjungan = st.sidebar.multiselect("🤝 Status Kunjungan", df[col_kunj].dropna().unique() if col_kunj else [])
 
-# Eksekusi Logika Filter
 df_filtered = df.copy()
 if filter_wilayah: df_filtered = df_filtered[df_filtered['wilayah_kendaraan'].isin(filter_wilayah)]
 if jenis_pemilik: df_filtered = df_filtered[df_filtered[col_jp].isin(jenis_pemilik)]
@@ -108,12 +112,11 @@ if status_kend: df_filtered = df_filtered[df_filtered[col_sk].isin(status_kend)]
 if status_kunjungan: df_filtered = df_filtered[df_filtered[col_kunj].isin(status_kunjungan)]
 
 # ==========================================
-# 4. DASHBOARD UTAMA (MATRIKS & VISUALISASI)
+# 4. DASHBOARD UTAMA
 # ==========================================
 if df_filtered.empty:
-    st.warning("📭 Tidak ada data kendaraan yang sesuai dengan kombinasi filter tersebut.")
+    st.warning("📭 Tidak ada data kendaraan yang sesuai dengan filter.")
 else:
-    # --- A. KARTU METRIKS (KPI) ---
     st.subheader("📈 Ringkasan Informasi Eksekutif")
     col1, col2, col3, col4 = st.columns(4)
     
@@ -122,18 +125,13 @@ else:
     total_belum_lunas = total_kendaraan - total_lunas
     total_wilayah_aktif = df_filtered['wilayah_kendaraan'].nunique()
     
-    with col1:
-        st.metric(label="Total Kendaraan", value=f"{total_kendaraan:,}".replace(',', '.'))
-    with col2:
-        st.metric(label="✅ Status Lunas", value=f"{total_lunas:,}".replace(',', '.'))
-    with col3:
-        st.metric(label="🚨 Belum Lunas", value=f"{total_belum_lunas:,}".replace(',', '.'))
-    with col4:
-        st.metric(label="📍 Jumlah Wilayah", value=total_wilayah_aktif)
+    with col1: st.metric(label="Total Kendaraan", value=f"{total_kendaraan:,}".replace(',', '.'))
+    with col2: st.metric(label="✅ Status Lunas", value=f"{total_lunas:,}".replace(',', '.'))
+    with col3: st.metric(label="🚨 Belum Lunas", value=f"{total_belum_lunas:,}".replace(',', '.'))
+    with col4: st.metric(label="📍 Jumlah Wilayah", value=total_wilayah_aktif)
         
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --- B. GRAFIK VISUAL (PLOTLY) ---
     st.subheader("📊 Visualisasi Data")
     chart_col1, chart_col2 = st.columns(2)
     
@@ -142,20 +140,17 @@ else:
             status_counts = df_filtered[col_sk].value_counts().reset_index()
             status_counts.columns = ['Status', 'Jumlah']
             fig_status = px.pie(status_counts, names='Status', values='Jumlah', hole=0.4, 
-                                title='Persentase Status Kendaraan', 
-                                color_discrete_sequence=px.colors.qualitative.Pastel)
+                                title='Persentase Status Kendaraan', color_discrete_sequence=px.colors.qualitative.Pastel)
             st.plotly_chart(fig_status, use_container_width=True)
 
     with chart_col2:
         wilayah_counts = df_filtered['wilayah_kendaraan'].value_counts().reset_index()
         wilayah_counts.columns = ['Wilayah', 'Jumlah']
         fig_wilayah = px.bar(wilayah_counts, x='Wilayah', y='Jumlah', 
-                             title='Sebaran Kendaraan per Wilayah',
-                             text_auto=True, color='Wilayah',
+                             title='Sebaran Kendaraan per Wilayah', text_auto=True, color='Wilayah',
                              color_discrete_sequence=px.colors.qualitative.Set2)
         st.plotly_chart(fig_wilayah, use_container_width=True)
 
-    # --- C. TABEL MATRIKS BERWARNA ---
     st.markdown("---")
     st.subheader("📑 Matriks Golongan vs Jenis Pemilik")
     if col_gol and col_jp:
@@ -163,10 +158,8 @@ else:
             matriks = pd.crosstab(df_filtered[col_gol], df_filtered[col_jp])
             st.dataframe(matriks.style.background_gradient(cmap='Blues'), use_container_width=True)
         except Exception as e:
-            st.error(f"Tabel matriks berwarna gagal dimuat. Menampilkan versi standar: {e}")
             st.dataframe(pd.crosstab(df_filtered[col_gol], df_filtered[col_jp]), use_container_width=True)
     
-    # --- D. TABEL DATA DETAIL ---
     st.markdown("---")
     with st.expander("Klik di sini untuk melihat Tabel Data Selengkapnya"):
         st.dataframe(df_filtered.head(1000), use_container_width=True) 
@@ -175,7 +168,6 @@ else:
     # 5. FUNGSI DOWNLOAD EXCEL & PDF
     # ==========================================
     st.write("### ⬇️ Unduh Laporan")
-    
     dl_col1, dl_col2 = st.columns(2)
     
     def convert_df_to_excel(dataframe):
@@ -186,25 +178,17 @@ else:
     
     with dl_col1:
         st.download_button(
-            label="📥 Download Laporan Excel",
-            data=convert_df_to_excel(df_filtered),
-            file_name="Laporan_SIGAP_Instansi.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            label="📥 Download Laporan Excel", data=convert_df_to_excel(df_filtered),
+            file_name="Laporan_SIGAP_Instansi.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         
     def convert_df_to_pdf(dataframe):
         html = dataframe.to_html(index=False)
-        pdf = pdfkit.from_string(html, False)
-        return pdf
+        return pdfkit.from_string(html, False)
     
     with dl_col2:
         try:
             pdf_data = convert_df_to_pdf(df_filtered.head(500))
-            st.download_button(
-                label="📄 Download Laporan PDF",
-                data=pdf_data,
-                file_name="Laporan_SIGAP_Instansi.pdf",
-                mime="application/pdf"
-            )
-        except Exception as e:
+            st.download_button(label="📄 Download Laporan PDF", data=pdf_data, file_name="Laporan_SIGAP_Instansi.pdf", mime="application/pdf")
+        except:
             st.info("⚠️ Fitur PDF memerlukan server khusus ('wkhtmltopdf'). Silakan unduh format Excel.")
