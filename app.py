@@ -10,8 +10,8 @@ import plotly.express as px
 # ==========================================
 # KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Dashboard SIGAP Instansi", page_icon="📊", layout="wide")
-st.title("📊 Dashboard Data SIGAP Instansi")
+st.set_page_config(page_title="Dashboard SIGAP Instansi & Perorangan", page_icon="📊", layout="wide")
+st.title("📊 Dashboard Data SIGAP Multi-Kategori")
 st.markdown("---")
 
 # ==========================================
@@ -19,12 +19,12 @@ st.markdown("---")
 # ==========================================
 @st.cache_data
 def load_data():
-    target_file = 'detil_data_sigap_instansi_2026-08-27T09_03_07.260452959Z.csv'
-    if os.path.exists(target_file):
-        return pd.read_csv(target_file)
+    # Mencari file CSV yang tersedia di direktori
     csv_files = glob.glob('*.csv')
     if csv_files:
-        return pd.read_csv(csv_files[0])
+        # Jika ada beberapa file, gabungkan atau muat file pertama
+        df_list = [pd.read_csv(f) for f in csv_files]
+        return pd.concat(df_list, ignore_index=True)
     return None
 
 df = load_data()
@@ -44,13 +44,11 @@ def cari_kolom(kata_kunci_list):
             return col
     return None
 
-col_jp = cari_kolom(['jenis_pemilik', 'pemilik_kendaraan'])
-col_np = cari_kolom(['nama_pemilik', 'nama_instansi', 'pemilik'])
+col_jp = cari_kolom(['jenis_pemilik', 'pemilik_kendaraan', 'kategori_pemilik', 'jenis_pemilikan'])
+col_np = cari_kolom(['nama_pemilik', 'nama_instansi', 'pemilik', 'nama'])
 col_sk = cari_kolom(['status_kendaraan', 'status_kend', 'status', 'lunas'])
 col_kunj = cari_kolom(['status_kunjungan', 'status_kunjung', 'kunjungan'])
 col_gol = cari_kolom(['jenis_golongan', 'golongan', 'jenis'])
-
-# Pencarian nama kolom plat nomor diperluas agar pasti terdeteksi
 col_plat = cari_kolom(['plat', 'nopol', 'no_pol', 'polisi', 'tnkb', 'kendaraan'])
 
 # ==========================================
@@ -58,7 +56,7 @@ col_plat = cari_kolom(['plat', 'nopol', 'no_pol', 'polisi', 'tnkb', 'kendaraan']
 # ==========================================
 def tentukan_wilayah(plat):
     if pd.isna(plat):
-        return None # Data kosong diabaikan
+        return None
     
     plat_str = str(plat).upper().strip()
     match = re.search(r'\d+[-.\s]*([A-Z])', plat_str)
@@ -71,15 +69,32 @@ def tentukan_wilayah(plat):
         elif seri == 'Y': return 'Bener Meriah'
         elif seri == 'G': return 'Aceh Tengah'
             
-    return None # Jika selain 5 wilayah ini, abaikan
+    return None
 
 if col_plat:
     df['wilayah_kendaraan'] = df[col_plat].apply(tentukan_wilayah)
-    # Filter dataset: Hanya simpan data yang termasuk 5 wilayah di atas
     df = df[df['wilayah_kendaraan'].notna()]
 else:
-    st.error("⚠️ Kolom Plat Nomor tidak dapat ditemukan di dalam file. Pastikan ada kata 'plat' atau 'nopol' di baris judul file Anda.")
+    st.error("⚠️ Kolom Plat Nomor tidak dapat ditemukan di dalam file.")
     st.stop()
+
+# Pengelompokan Kategori Pemilik (Instansi, Perusahaan, Perorangan)
+def kelompokkan_kategori(val):
+    if pd.isna(val):
+        return 'Lainnya'
+    val_str = str(val).upper()
+    if any(k in val_str for k in ['INSTANSI', 'PEMERINTAH', 'DINAS', 'GOV', 'BUMN', 'BUMD']):
+        return 'Instansi'
+    elif any(k in val_str for k in ['PERUSAHAAN', 'PT', 'CV', 'SWASTA', 'CORP', 'FIRMA']):
+        return 'Perusahaan'
+    elif any(k in val_str for k in ['PERORANGAN', 'PRIBADI', 'PERORANG']):
+        return 'Perorangan'
+    return 'Lainnya'
+
+if col_jp:
+    df['kategori_entitas'] = df[col_jp].apply(kelompokkan_kategori)
+else:
+    df['kategori_entitas'] = 'Perorangan'
 
 # ==========================================
 # 3. KONFIGURASI SIDEBAR & FILTER
@@ -87,19 +102,31 @@ else:
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/8636/8636208.png", width=100)
 st.sidebar.header("🔍 Filter Data")
 
-# Filter wilayah murni hanya menampilkan 5 wilayah yang Anda inginkan
+# Filter Kategori Utama (Instansi, Perusahaan, Perorangan)
+opsi_kategori = ['Instansi', 'Perusahaan', 'Perorangan']
+kategori_terpilih = st.sidebar.multiselect("🏷️ Kategori Pemilik", opsi_kategori, default=opsi_kategori)
+
 filter_wilayah = st.sidebar.multiselect("📍 Wilayah (Sesuai Plat)", df['wilayah_kendaraan'].unique())
-jenis_pemilik = st.sidebar.multiselect("🏢 Jenis Pemilik", df[col_jp].dropna().unique() if col_jp else [])
+jenis_pemilik = st.sidebar.multiselect("🏢 Detail Jenis Pemilik", df[col_jp].dropna().unique() if col_jp else [])
 nama_pemilik = st.sidebar.multiselect("👤 Nama Pemilik", df[col_np].dropna().unique() if col_np else [])
 status_kend = st.sidebar.multiselect("💰 Status Kendaraan", df[col_sk].dropna().unique() if col_sk else [])
 status_kunjungan = st.sidebar.multiselect("🤝 Status Kunjungan", df[col_kunj].dropna().unique() if col_kunj else [])
 
+# Penerapan Filter
 df_filtered = df.copy()
-if filter_wilayah: df_filtered = df_filtered[df_filtered['wilayah_kendaraan'].isin(filter_wilayah)]
-if jenis_pemilik: df_filtered = df_filtered[df_filtered[col_jp].isin(jenis_pemilik)]
-if nama_pemilik: df_filtered = df_filtered[df_filtered[col_np].isin(nama_pemilik)]
-if status_kend: df_filtered = df_filtered[df_filtered[col_sk].isin(status_kend)]
-if status_kunjungan: df_filtered = df_filtered[df_filtered[col_kunj].isin(status_kunjungan)]
+
+if kategori_terpilih:
+    df_filtered = df_filtered[df_filtered['kategori_entitas'].isin(kategori_terpilih)]
+if filter_wilayah: 
+    df_filtered = df_filtered[df_filtered['wilayah_kendaraan'].isin(filter_wilayah)]
+if jenis_pemilik and col_jp: 
+    df_filtered = df_filtered[df_filtered[col_jp].isin(jenis_pemilik)]
+if nama_pemilik and col_np: 
+    df_filtered = df_filtered[df_filtered[col_np].isin(nama_pemilik)]
+if status_kend and col_sk: 
+    df_filtered = df_filtered[df_filtered[col_sk].isin(status_kend)]
+if status_kunjungan and col_kunj: 
+    df_filtered = df_filtered[df_filtered[col_kunj].isin(status_kunjungan)]
 
 # ==========================================
 # 4. DASHBOARD UTAMA
@@ -142,13 +169,13 @@ else:
         st.plotly_chart(fig_wilayah, use_container_width=True)
 
     st.markdown("---")
-    st.subheader("📑 Matriks Golongan vs Jenis Pemilik")
-    if col_gol and col_jp:
+    st.subheader("📑 Matriks Golongan vs Kategori Pemilik")
+    if col_gol:
         try:
-            matriks = pd.crosstab(df_filtered[col_gol], df_filtered[col_jp])
+            matriks = pd.crosstab(df_filtered[col_gol], df_filtered['kategori_entitas'])
             st.dataframe(matriks.style.background_gradient(cmap='Blues'), use_container_width=True)
-        except Exception as e:
-            st.dataframe(pd.crosstab(df_filtered[col_gol], df_filtered[col_jp]), use_container_width=True)
+        except Exception:
+            st.dataframe(pd.crosstab(df_filtered[col_gol], df_filtered['kategori_entitas']), use_container_width=True)
     
     st.markdown("---")
     with st.expander("Klik di sini untuk melihat Tabel Data Selengkapnya"):
