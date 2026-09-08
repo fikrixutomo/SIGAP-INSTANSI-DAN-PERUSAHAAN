@@ -19,18 +19,23 @@ st.markdown("---")
 # ==========================================
 @st.cache_data
 def load_data():
-    # Mencari file CSV yang tersedia di direktori
+    # Mencari file CSV
     csv_files = glob.glob('*.csv')
-    if csv_files:
-        # Jika ada beberapa file, gabungkan atau muat file pertama
-        df_list = [pd.read_csv(f) for f in csv_files]
-        return pd.concat(df_list, ignore_index=True)
-    return None
+    if not csv_files:
+        return None
+    
+    # PERBAIKAN: Lebih baik membaca file terbaru untuk mencegah error karena 
+    # menggabungkan 2 tipe file yang berbeda (misal: detil_data vs detil_potensi).
+    csv_files.sort(key=os.path.getmtime, reverse=True)
+    
+    # Membaca file CSV utama (terbaru) 
+    df = pd.read_csv(csv_files[0], low_memory=False)
+    return df
 
 df = load_data()
 
 if df is None:
-    st.error("⚠️ File CSV tidak ditemukan! Pastikan file data Anda sudah di-upload.")
+    st.error("⚠️ File CSV tidak ditemukan! Pastikan file data Anda sudah di-upload dan satu folder dengan script.")
     st.stop()
 
 # ==========================================
@@ -44,7 +49,8 @@ def cari_kolom(kata_kunci_list):
             return col
     return None
 
-col_jp = cari_kolom(['jenis_pemilik', 'pemilik_kendaraan', 'kategori_pemilik', 'jenis_pemilikan'])
+# PERBAIKAN: Memperluas jangkauan kata kunci pencarian kolom
+col_jp = cari_kolom(['jenis_pemilik', 'pemilik_kendaraan', 'kategori_pemilik', 'jenis_pemilikan', 'kepemilikan', 'golongan_pemilik'])
 col_np = cari_kolom(['nama_pemilik', 'nama_instansi', 'pemilik', 'nama'])
 col_sk = cari_kolom(['status_kendaraan', 'status_kend', 'status', 'lunas'])
 col_kunj = cari_kolom(['status_kunjungan', 'status_kunjung', 'kunjungan'])
@@ -52,7 +58,7 @@ col_gol = cari_kolom(['jenis_golongan', 'golongan', 'jenis'])
 col_plat = cari_kolom(['plat', 'nopol', 'no_pol', 'polisi', 'tnkb', 'kendaraan'])
 
 # ==========================================
-# 2. FILTER 5 WILAYAH UTAMA (DI BELAKANG LAYAR)
+# 2. PENGELOMPOKAN WILAYAH & KATEGORI PEMILIK
 # ==========================================
 def tentukan_wilayah(plat):
     if pd.isna(plat):
@@ -78,22 +84,34 @@ else:
     st.error("⚠️ Kolom Plat Nomor tidak dapat ditemukan di dalam file.")
     st.stop()
 
-# Pengelompokan Kategori Pemilik (Instansi, Perusahaan, Perorangan)
+# PERBAIKAN: Logika Pengelompokan Kategori yang Lebih Akurat
 def kelompokkan_kategori(val):
     if pd.isna(val):
-        return 'Lainnya'
+        # Jika kosong, asumsikan Perorangan
+        return 'Perorangan'
+        
     val_str = str(val).upper()
-    if any(k in val_str for k in ['INSTANSI', 'PEMERINTAH', 'DINAS', 'GOV', 'BUMN', 'BUMD']):
+    
+    # Deteksi Instansi / Pemerintah
+    if any(k in val_str for k in ['INSTANSI', 'PEMERINTAH', 'DINAS', 'GOV', 'BUMN', 'BUMD', 'NEGARA']):
         return 'Instansi'
-    elif any(k in val_str for k in ['PERUSAHAAN', 'PT', 'CV', 'SWASTA', 'CORP', 'FIRMA']):
+    
+    # Deteksi Perusahaan / Badan Hukum
+    elif any(k in val_str for k in ['PERUSAHAAN', 'PT', 'CV', 'SWASTA', 'CORP', 'FIRMA', 'BADAN', 'HUKUM', 'YAYASAN', 'KOPERASI']):
         return 'Perusahaan'
+    
+    # Deteksi Perorangan Eksplisit
     elif any(k in val_str for k in ['PERORANGAN', 'PRIBADI', 'PERORANG']):
         return 'Perorangan'
-    return 'Lainnya'
+        
+    # Jika tidak terdeteksi sebagai Instansi / Perusahaan, maka masuk Perorangan
+    return 'Perorangan'
 
+# Menerapkan kelompok kategori
 if col_jp:
     df['kategori_entitas'] = df[col_jp].apply(kelompokkan_kategori)
 else:
+    # Fallback jika kolom tidak ditemukan sama sekali
     df['kategori_entitas'] = 'Perorangan'
 
 # ==========================================
@@ -106,7 +124,9 @@ st.sidebar.header("🔍 Filter Data")
 opsi_kategori = ['Instansi', 'Perusahaan', 'Perorangan']
 kategori_terpilih = st.sidebar.multiselect("🏷️ Kategori Pemilik", opsi_kategori, default=opsi_kategori)
 
-filter_wilayah = st.sidebar.multiselect("📍 Wilayah (Sesuai Plat)", df['wilayah_kendaraan'].unique())
+filter_wilayah = st.sidebar.multiselect("📍 Wilayah (Sesuai Plat)", df['wilayah_kendaraan'].dropna().unique())
+
+# Kolom filter opsional (Jika ada di data)
 jenis_pemilik = st.sidebar.multiselect("🏢 Detail Jenis Pemilik", df[col_jp].dropna().unique() if col_jp else [])
 nama_pemilik = st.sidebar.multiselect("👤 Nama Pemilik", df[col_np].dropna().unique() if col_np else [])
 status_kend = st.sidebar.multiselect("💰 Status Kendaraan", df[col_sk].dropna().unique() if col_sk else [])
@@ -132,7 +152,7 @@ if status_kunjungan and col_kunj:
 # 4. DASHBOARD UTAMA
 # ==========================================
 if df_filtered.empty:
-    st.warning("📭 Tidak ada data yang sesuai.")
+    st.warning("📭 Tidak ada data yang sesuai dengan filter saat ini.")
 else:
     st.subheader("📈 Ringkasan Informasi Eksekutif")
     col1, col2, col3, col4 = st.columns(4)
@@ -179,6 +199,7 @@ else:
     
     st.markdown("---")
     with st.expander("Klik di sini untuk melihat Tabel Data Selengkapnya"):
+        # Tampilkan 1000 data teratas agar tidak berat saat loading browser
         st.dataframe(df_filtered.head(1000), use_container_width=True) 
 
     # ==========================================
@@ -196,7 +217,7 @@ else:
     with dl_col1:
         st.download_button(
             label="📥 Download Laporan Excel", data=convert_df_to_excel(df_filtered),
-            file_name="Laporan_SIGAP_Instansi.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            file_name="Laporan_SIGAP_Instansi_dan_Perorangan.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         
     def convert_df_to_pdf(dataframe):
@@ -205,7 +226,7 @@ else:
     
     with dl_col2:
         try:
-            pdf_data = convert_df_to_pdf(df_filtered.head(500))
-            st.download_button(label="📄 Download Laporan PDF", data=pdf_data, file_name="Laporan_SIGAP_Instansi.pdf", mime="application/pdf")
+            pdf_data = convert_df_to_pdf(df_filtered.head(500)) # Batasi 500 baris untuk PDF
+            st.download_button(label="📄 Download Laporan PDF", data=pdf_data, file_name="Laporan_SIGAP.pdf", mime="application/pdf")
         except:
             st.info("⚠️ Fitur PDF memerlukan server khusus ('wkhtmltopdf'). Silakan unduh format Excel.")
