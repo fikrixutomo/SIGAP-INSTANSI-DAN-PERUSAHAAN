@@ -19,28 +19,35 @@ st.markdown("---")
 # ==========================================
 @st.cache_data
 def load_data():
-    # Mencari file CSV
     csv_files = glob.glob('*.csv')
     if not csv_files:
         return None
     
-    # PERBAIKAN: Lebih baik membaca file terbaru untuk mencegah error karena 
-    # menggabungkan 2 tipe file yang berbeda (misal: detil_data vs detil_potensi).
+    # Prioritaskan membaca file 'detil_data' dan ambil yang terbaru
     csv_files.sort(key=os.path.getmtime, reverse=True)
-    
-    # Membaca file CSV utama (terbaru) 
-    df = pd.read_csv(csv_files[0], low_memory=False)
-    return df
+    target_file = None
+    for f in csv_files:
+        if 'detil_data' in f.lower():
+            target_file = f
+            break
+            
+    if not target_file:
+        target_file = csv_files[0]
+        
+    return pd.read_csv(target_file, low_memory=False)
 
 df = load_data()
 
 if df is None:
-    st.error("⚠️ File CSV tidak ditemukan! Pastikan file data Anda sudah di-upload dan satu folder dengan script.")
+    st.error("⚠️ File CSV tidak ditemukan! Pastikan file data Anda berada di folder yang sama dengan script.")
     st.stop()
 
 # ==========================================
 # 1. PERSIAPAN NAMA KOLOM
 # ==========================================
+# Simpan nama kolom asli untuk keperluan debug nanti
+kolom_asli = df.columns.tolist()
+
 df.columns = df.columns.str.lower().str.strip().str.replace(' ', '_')
 
 def cari_kolom(kata_kunci_list):
@@ -49,9 +56,8 @@ def cari_kolom(kata_kunci_list):
             return col
     return None
 
-# PERBAIKAN: Memperluas jangkauan kata kunci pencarian kolom
-col_jp = cari_kolom(['jenis_pemilik', 'pemilik_kendaraan', 'kategori_pemilik', 'jenis_pemilikan', 'kepemilikan', 'golongan_pemilik'])
-col_np = cari_kolom(['nama_pemilik', 'nama_instansi', 'pemilik', 'nama'])
+col_np = cari_kolom(['nama_pemilik', 'nama_instansi', 'pemilik', 'nama', 'nm_pemilik'])
+col_jp = cari_kolom(['jenis_pemilik', 'pemilik_kendaraan', 'kategori_pemilik', 'jenis_pemilikan', 'kepemilikan'])
 col_sk = cari_kolom(['status_kendaraan', 'status_kend', 'status', 'lunas'])
 col_kunj = cari_kolom(['status_kunjungan', 'status_kunjung', 'kunjungan'])
 col_gol = cari_kolom(['jenis_golongan', 'golongan', 'jenis'])
@@ -61,9 +67,7 @@ col_plat = cari_kolom(['plat', 'nopol', 'no_pol', 'polisi', 'tnkb', 'kendaraan']
 # 2. PENGELOMPOKAN WILAYAH & KATEGORI PEMILIK
 # ==========================================
 def tentukan_wilayah(plat):
-    if pd.isna(plat):
-        return None
-    
+    if pd.isna(plat): return None
     plat_str = str(plat).upper().strip()
     match = re.search(r'\d+[-.\s]*([A-Z])', plat_str)
     
@@ -74,45 +78,50 @@ def tentukan_wilayah(plat):
         elif seri in ['K', 'Q']: return 'Aceh Utara'
         elif seri == 'Y': return 'Bener Meriah'
         elif seri == 'G': return 'Aceh Tengah'
-            
     return None
 
 if col_plat:
     df['wilayah_kendaraan'] = df[col_plat].apply(tentukan_wilayah)
     df = df[df['wilayah_kendaraan'].notna()]
-else:
-    st.error("⚠️ Kolom Plat Nomor tidak dapat ditemukan di dalam file.")
-    st.stop()
 
-# PERBAIKAN: Logika Pengelompokan Kategori yang Lebih Akurat
-def kelompokkan_kategori(val):
-    if pd.isna(val):
-        # Jika kosong, asumsikan Perorangan
+def klasifikasi_entitas(row):
+    teks = ""
+    # Pindai dari nama pemilik
+    if col_np and pd.notna(row.get(col_np)):
+        teks += str(row[col_np]).upper() + " "
+    # Pindai dari jenis pemilik juga
+    if col_jp and pd.notna(row.get(col_jp)):
+        teks += str(row[col_jp]).upper() + " "
+        
+    if not teks.strip():
         return 'Perorangan'
         
-    val_str = str(val).upper()
+    # KATA KUNCI INSTANSI (Sangat Lengkap)
+    kw_instansi = [
+        'DINAS ', 'PEMERINTAH', 'KABUPATEN', 'PROVINSI', 'KOTA ', 'PEMKAB', 'PEMKOT', 'PEMPROV',
+        'GAMPONG', 'DESA ', 'KECAMATAN', 'KEMENTERIAN', 'BAPPEDA', 'INSPEKTORAT', 'SEKRETARIAT',
+        'BADAN', 'KANTOR', 'POLRI', 'POLRES', 'POLDA', 'TNI', 'KODIM', 'KORAMIL', 'PUSKESMAS',
+        'RSUD', 'RSU', 'BUMN', 'BUMD', 'NEGARA', 'BKKBN', 'KEJAKSAAN', 'PENGADILAN'
+    ]
     
-    # Deteksi Instansi / Pemerintah
-    if any(k in val_str for k in ['INSTANSI', 'PEMERINTAH', 'DINAS', 'GOV', 'BUMN', 'BUMD', 'NEGARA']):
-        return 'Instansi'
+    # KATA KUNCI PERUSAHAAN (Sangat Lengkap)
+    kw_perusahaan = [
+        'PT ', 'PT.', ' PT', 'CV ', 'CV.', ' CV', 'YAYASAN', 'KOPERASI', 'BANK ', 'BPR ', 
+        'FIRMA', 'SWASTA', 'CORP', 'PDAM', 'LKM', 'LEMBAGA', 'UD ', 'UD.', ' UD'
+    ]
     
-    # Deteksi Perusahaan / Badan Hukum
-    elif any(k in val_str for k in ['PERUSAHAAN', 'PT', 'CV', 'SWASTA', 'CORP', 'FIRMA', 'BADAN', 'HUKUM', 'YAYASAN', 'KOPERASI']):
-        return 'Perusahaan'
-    
-    # Deteksi Perorangan Eksplisit
-    elif any(k in val_str for k in ['PERORANGAN', 'PRIBADI', 'PERORANG']):
-        return 'Perorangan'
+    if "BADAN USAHA" in teks: return 'Perusahaan'
         
-    # Jika tidak terdeteksi sebagai Instansi / Perusahaan, maka masuk Perorangan
+    for k in kw_instansi:
+        if k in teks: return 'Instansi'
+            
+    for k in kw_perusahaan:
+        if k in teks: return 'Perusahaan'
+            
     return 'Perorangan'
 
-# Menerapkan kelompok kategori
-if col_jp:
-    df['kategori_entitas'] = df[col_jp].apply(kelompokkan_kategori)
-else:
-    # Fallback jika kolom tidak ditemukan sama sekali
-    df['kategori_entitas'] = 'Perorangan'
+# Terapkan Klasifikasi Baru
+df['kategori_entitas'] = df.apply(klasifikasi_entitas, axis=1)
 
 # ==========================================
 # 3. KONFIGURASI SIDEBAR & FILTER
@@ -120,33 +129,23 @@ else:
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/8636/8636208.png", width=100)
 st.sidebar.header("🔍 Filter Data")
 
-# Filter Kategori Utama (Instansi, Perusahaan, Perorangan)
 opsi_kategori = ['Instansi', 'Perusahaan', 'Perorangan']
 kategori_terpilih = st.sidebar.multiselect("🏷️ Kategori Pemilik", opsi_kategori, default=opsi_kategori)
 
 filter_wilayah = st.sidebar.multiselect("📍 Wilayah (Sesuai Plat)", df['wilayah_kendaraan'].dropna().unique())
-
-# Kolom filter opsional (Jika ada di data)
 jenis_pemilik = st.sidebar.multiselect("🏢 Detail Jenis Pemilik", df[col_jp].dropna().unique() if col_jp else [])
 nama_pemilik = st.sidebar.multiselect("👤 Nama Pemilik", df[col_np].dropna().unique() if col_np else [])
 status_kend = st.sidebar.multiselect("💰 Status Kendaraan", df[col_sk].dropna().unique() if col_sk else [])
 status_kunjungan = st.sidebar.multiselect("🤝 Status Kunjungan", df[col_kunj].dropna().unique() if col_kunj else [])
 
-# Penerapan Filter
 df_filtered = df.copy()
 
-if kategori_terpilih:
-    df_filtered = df_filtered[df_filtered['kategori_entitas'].isin(kategori_terpilih)]
-if filter_wilayah: 
-    df_filtered = df_filtered[df_filtered['wilayah_kendaraan'].isin(filter_wilayah)]
-if jenis_pemilik and col_jp: 
-    df_filtered = df_filtered[df_filtered[col_jp].isin(jenis_pemilik)]
-if nama_pemilik and col_np: 
-    df_filtered = df_filtered[df_filtered[col_np].isin(nama_pemilik)]
-if status_kend and col_sk: 
-    df_filtered = df_filtered[df_filtered[col_sk].isin(status_kend)]
-if status_kunjungan and col_kunj: 
-    df_filtered = df_filtered[df_filtered[col_kunj].isin(status_kunjungan)]
+if kategori_terpilih: df_filtered = df_filtered[df_filtered['kategori_entitas'].isin(kategori_terpilih)]
+if filter_wilayah: df_filtered = df_filtered[df_filtered['wilayah_kendaraan'].isin(filter_wilayah)]
+if jenis_pemilik and col_jp: df_filtered = df_filtered[df_filtered[col_jp].isin(jenis_pemilik)]
+if nama_pemilik and col_np: df_filtered = df_filtered[df_filtered[col_np].isin(nama_pemilik)]
+if status_kend and col_sk: df_filtered = df_filtered[df_filtered[col_sk].isin(status_kend)]
+if status_kunjungan and col_kunj: df_filtered = df_filtered[df_filtered[col_kunj].isin(status_kunjungan)]
 
 # ==========================================
 # 4. DASHBOARD UTAMA
@@ -168,7 +167,6 @@ else:
     with col4: st.metric(label="📍 Jumlah Wilayah", value=total_wilayah_aktif)
         
     st.markdown("<br>", unsafe_allow_html=True)
-
     st.subheader("📊 Visualisasi Data")
     chart_col1, chart_col2 = st.columns(2)
     
@@ -189,25 +187,11 @@ else:
         st.plotly_chart(fig_wilayah, use_container_width=True)
 
     st.markdown("---")
-    st.subheader("📑 Matriks Golongan vs Kategori Pemilik")
-    if col_gol:
-        try:
-            matriks = pd.crosstab(df_filtered[col_gol], df_filtered['kategori_entitas'])
-            st.dataframe(matriks.style.background_gradient(cmap='Blues'), use_container_width=True)
-        except Exception:
-            st.dataframe(pd.crosstab(df_filtered[col_gol], df_filtered['kategori_entitas']), use_container_width=True)
-    
-    st.markdown("---")
     with st.expander("Klik di sini untuk melihat Tabel Data Selengkapnya"):
-        # Tampilkan 1000 data teratas agar tidak berat saat loading browser
         st.dataframe(df_filtered.head(1000), use_container_width=True) 
 
-    # ==========================================
-    # 5. FUNGSI DOWNLOAD EXCEL & PDF
-    # ==========================================
     st.write("### ⬇️ Unduh Laporan")
     dl_col1, dl_col2 = st.columns(2)
-    
     def convert_df_to_excel(dataframe):
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -215,18 +199,22 @@ else:
         return output.getvalue()
     
     with dl_col1:
-        st.download_button(
-            label="📥 Download Laporan Excel", data=convert_df_to_excel(df_filtered),
-            file_name="Laporan_SIGAP_Instansi_dan_Perorangan.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-        
-    def convert_df_to_pdf(dataframe):
-        html = dataframe.to_html(index=False)
-        return pdfkit.from_string(html, False)
+        st.download_button(label="📥 Download Laporan Excel", data=convert_df_to_excel(df_filtered), file_name="Laporan_SIGAP.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+# ==========================================
+# 5. MODE DEBUG (PEMERIKSAAN DATA)
+# ==========================================
+st.markdown("---")
+with st.expander("🛠️ Mode Debug (Buka Jika Data Masih Kosong)"):
+    st.write("Bagian ini membantu menganalisis mengapa data Instansi/Perusahaan tidak terbaca.")
+    st.write(f"- **Kolom Nama Pemilik Terdeteksi:** `{col_np}`")
+    st.write(f"- **Kolom Jenis Pemilik Terdeteksi:** `{col_jp}`")
     
-    with dl_col2:
-        try:
-            pdf_data = convert_df_to_pdf(df_filtered.head(500)) # Batasi 500 baris untuk PDF
-            st.download_button(label="📄 Download Laporan PDF", data=pdf_data, file_name="Laporan_SIGAP.pdf", mime="application/pdf")
-        except:
-            st.info("⚠️ Fitur PDF memerlukan server khusus ('wkhtmltopdf'). Silakan unduh format Excel.")
+    # Menampilkan ringkasan klasifikasi
+    st.write("**Hasil Pembagian Kategori Saat Ini:**")
+    st.dataframe(df['kategori_entitas'].value_counts().reset_index())
+    
+    # Menampilkan sampel data mentah untuk nama pemilik
+    st.write("**Sampel 50 Nama Pemilik Asli di File Anda:**")
+    if col_np:
+        st.dataframe(df[[col_np, 'kategori_entitas']].drop_duplicates().head(50))
