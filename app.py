@@ -10,8 +10,8 @@ import plotly.express as px
 # ==========================================
 # KONFIGURASI HALAMAN
 # ==========================================
-st.set_page_config(page_title="Dashboard SIGAP Instansi & Perorangan", page_icon="📊", layout="wide")
-st.title("📊 Dashboard Data SIGAP Multi-Kategori")
+st.set_page_config(page_title="Dashboard SIGAP Multi-Kategori", page_icon="📊", layout="wide")
+st.title("📊 Dashboard Data SIGAP (Pemerintahan, Perusahaan, Perorangan)")
 st.markdown("---")
 
 # ==========================================
@@ -21,22 +21,15 @@ st.markdown("---")
 def load_data():
     csv_files = glob.glob('*.csv')
     if not csv_files:
-        return None
+        return None, None
     
-    # Prioritaskan membaca file 'detil_data' dan ambil yang terbaru
+    # Ambil file terbaru yang di-upload ke folder
     csv_files.sort(key=os.path.getmtime, reverse=True)
-    target_file = None
-    for f in csv_files:
-        if 'detil_data' in f.lower():
-            target_file = f
-            break
-            
-    if not target_file:
-        target_file = csv_files[0]
+    target_file = csv_files[0]
         
-    return pd.read_csv(target_file, low_memory=False)
+    return pd.read_csv(target_file, low_memory=False), target_file
 
-df = load_data()
+df, file_name = load_data()
 
 if df is None:
     st.error("⚠️ File CSV tidak ditemukan! Pastikan file data Anda berada di folder yang sama dengan script.")
@@ -45,9 +38,6 @@ if df is None:
 # ==========================================
 # 1. PERSIAPAN NAMA KOLOM
 # ==========================================
-# Simpan nama kolom asli untuk keperluan debug nanti
-kolom_asli = df.columns.tolist()
-
 df.columns = df.columns.str.lower().str.strip().str.replace(' ', '_')
 
 def cari_kolom(kata_kunci_list):
@@ -86,25 +76,23 @@ if col_plat:
 
 def klasifikasi_entitas(row):
     teks = ""
-    # Pindai dari nama pemilik
     if col_np and pd.notna(row.get(col_np)):
         teks += str(row[col_np]).upper() + " "
-    # Pindai dari jenis pemilik juga
     if col_jp and pd.notna(row.get(col_jp)):
         teks += str(row[col_jp]).upper() + " "
         
     if not teks.strip():
         return 'Perorangan'
         
-    # KATA KUNCI INSTANSI (Sangat Lengkap)
-    kw_instansi = [
+    # KATA KUNCI PEMERINTAHAN
+    kw_pemerintahan = [
         'DINAS ', 'PEMERINTAH', 'KABUPATEN', 'PROVINSI', 'KOTA ', 'PEMKAB', 'PEMKOT', 'PEMPROV',
         'GAMPONG', 'DESA ', 'KECAMATAN', 'KEMENTERIAN', 'BAPPEDA', 'INSPEKTORAT', 'SEKRETARIAT',
         'BADAN', 'KANTOR', 'POLRI', 'POLRES', 'POLDA', 'TNI', 'KODIM', 'KORAMIL', 'PUSKESMAS',
-        'RSUD', 'RSU', 'BUMN', 'BUMD', 'NEGARA', 'BKKBN', 'KEJAKSAAN', 'PENGADILAN'
+        'RSUD', 'RSU', 'BUMN', 'BUMD', 'NEGARA', 'BKKBN', 'KEJAKSAAN', 'PENGADILAN', 'INSTANSI'
     ]
     
-    # KATA KUNCI PERUSAHAAN (Sangat Lengkap)
+    # KATA KUNCI PERUSAHAAN
     kw_perusahaan = [
         'PT ', 'PT.', ' PT', 'CV ', 'CV.', ' CV', 'YAYASAN', 'KOPERASI', 'BANK ', 'BPR ', 
         'FIRMA', 'SWASTA', 'CORP', 'PDAM', 'LKM', 'LEMBAGA', 'UD ', 'UD.', ' UD'
@@ -112,12 +100,14 @@ def klasifikasi_entitas(row):
     
     if "BADAN USAHA" in teks: return 'Perusahaan'
         
-    for k in kw_instansi:
-        if k in teks: return 'Instansi'
+    for k in kw_pemerintahan:
+        if k in teks: return 'Pemerintahan'
             
     for k in kw_perusahaan:
         if k in teks: return 'Perusahaan'
             
+    # Jika tidak ada unsur PT/CV/Dinas dll, otomatis dianggap nama orang (Perorangan)
+    # Ini sangat cocok untuk file data "SIGAP Prioritas"
     return 'Perorangan'
 
 # Terapkan Klasifikasi Baru
@@ -129,7 +119,8 @@ df['kategori_entitas'] = df.apply(klasifikasi_entitas, axis=1)
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/8636/8636208.png", width=100)
 st.sidebar.header("🔍 Filter Data")
 
-opsi_kategori = ['Instansi', 'Perusahaan', 'Perorangan']
+# Filter Kategori disesuaikan dengan permintaan Anda
+opsi_kategori = ['Pemerintahan', 'Perusahaan', 'Perorangan']
 kategori_terpilih = st.sidebar.multiselect("🏷️ Kategori Pemilik", opsi_kategori, default=opsi_kategori)
 
 filter_wilayah = st.sidebar.multiselect("📍 Wilayah (Sesuai Plat)", df['wilayah_kendaraan'].dropna().unique())
@@ -150,6 +141,8 @@ if status_kunjungan and col_kunj: df_filtered = df_filtered[df_filtered[col_kunj
 # ==========================================
 # 4. DASHBOARD UTAMA
 # ==========================================
+st.info(f"📁 **Membaca data dari file:** `{file_name}`")
+
 if df_filtered.empty:
     st.warning("📭 Tidak ada data yang sesuai dengan filter saat ini.")
 else:
@@ -187,7 +180,7 @@ else:
         st.plotly_chart(fig_wilayah, use_container_width=True)
 
     st.markdown("---")
-    with st.expander("Klik di sini untuk melihat Tabel Data Selengkapnya"):
+    with st.expander("Klik di sini untuk melihat Tabel Data Selengkapnya (Maks 1000 Baris Pertama)"):
         st.dataframe(df_filtered.head(1000), use_container_width=True) 
 
     st.write("### ⬇️ Unduh Laporan")
@@ -200,21 +193,3 @@ else:
     
     with dl_col1:
         st.download_button(label="📥 Download Laporan Excel", data=convert_df_to_excel(df_filtered), file_name="Laporan_SIGAP.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-# ==========================================
-# 5. MODE DEBUG (PEMERIKSAAN DATA)
-# ==========================================
-st.markdown("---")
-with st.expander("🛠️ Mode Debug (Buka Jika Data Masih Kosong)"):
-    st.write("Bagian ini membantu menganalisis mengapa data Instansi/Perusahaan tidak terbaca.")
-    st.write(f"- **Kolom Nama Pemilik Terdeteksi:** `{col_np}`")
-    st.write(f"- **Kolom Jenis Pemilik Terdeteksi:** `{col_jp}`")
-    
-    # Menampilkan ringkasan klasifikasi
-    st.write("**Hasil Pembagian Kategori Saat Ini:**")
-    st.dataframe(df['kategori_entitas'].value_counts().reset_index())
-    
-    # Menampilkan sampel data mentah untuk nama pemilik
-    st.write("**Sampel 50 Nama Pemilik Asli di File Anda:**")
-    if col_np:
-        st.dataframe(df[[col_np, 'kategori_entitas']].drop_duplicates().head(50))
